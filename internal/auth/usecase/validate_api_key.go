@@ -1,0 +1,77 @@
+package usecase
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/aws-payment-gateway/internal/auth/repository"
+	"github.com/google/uuid"
+)
+
+// ValidateApiKeyInput represents the input for API key validation
+type ValidateApiKeyInput struct {
+	KeyHash string `json:"key_hash" validate:"required"`
+}
+
+// ValidateApiKeyOutput represents the output of API key validation
+type ValidateApiKeyOutput struct {
+	Valid       bool       `json:"valid"`
+	AccountID   *uuid.UUID `json:"account_id,omitempty"`
+	APIKeyID    *uuid.UUID `json:"api_key_id,omitempty"`
+	Name        *string    `json:"name,omitempty"`
+	Permissions []string   `json:"permissions,omitempty"`
+	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+}
+
+// ValidateApiKey handles the business logic for validating API keys
+type ValidateApiKey struct {
+	apiKeyRepo repository.ApiKeyRepository
+}
+
+// NewValidateApiKey creates a new ValidateApiKey use case
+func NewValidateApiKey(apiKeyRepo repository.ApiKeyRepository) *ValidateApiKey {
+	return &ValidateApiKey{
+		apiKeyRepo: apiKeyRepo,
+	}
+}
+
+// Execute validates an API key and returns the result
+func (uc *ValidateApiKey) Execute(ctx context.Context, input ValidateApiKeyInput) (*ValidateApiKeyOutput, error) {
+	// Validate input
+	if err := uc.validateInput(input); err != nil {
+		return nil, fmt.Errorf("invalid input: %w", err)
+	}
+
+	// Get API key by hash
+	apiKey, err := uc.apiKeyRepo.GetByKeyHash(ctx, input.KeyHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get API key: %w", err)
+	}
+
+	// Create output
+	output := &ValidateApiKeyOutput{
+		Valid: apiKey != nil && apiKey.IsValid() && !apiKey.IsExpired(),
+	}
+
+	if apiKey != nil {
+		output.AccountID = &apiKey.AccountID
+		output.APIKeyID = &apiKey.ID
+		output.Name = &apiKey.Name
+		output.Permissions = apiKey.Permissions
+		output.LastUsedAt = apiKey.LastUsedAt
+		output.ExpiresAt = &apiKey.ExpiresAt
+	}
+
+	return output, nil
+}
+
+// validateInput validates the API key validation input
+func (uc *ValidateApiKey) validateInput(input ValidateApiKeyInput) error {
+	if input.KeyHash == "" {
+		return fmt.Errorf("key_hash is required")
+	}
+
+	return nil
+}
