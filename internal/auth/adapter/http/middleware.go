@@ -61,9 +61,11 @@ func (m *AuthMiddleware) RequireAuth() fiber.Handler {
 			})
 		}
 
-		// Validate API key using repository method
+		// Validate API key using usecase
 		ctx := context.Background()
-		validatedKey, err := m.apiKeyRepo.ValidateByKey(ctx, apiKey)
+		validationOutput, err := m.validateApiKey.Execute(ctx, usecase.ValidateApiKeyInput{
+			KeyHash: apiKey,
+		})
 		if err != nil {
 			// Log failed authentication attempt
 			m.auditLogger.LogAuthentication(
@@ -81,7 +83,7 @@ func (m *AuthMiddleware) RequireAuth() fiber.Handler {
 			})
 		}
 
-		if validatedKey == nil {
+		if !validationOutput.Valid || validationOutput.AccountID == nil {
 			// Log failed authentication attempt
 			m.auditLogger.LogAuthentication(
 				ctx,
@@ -100,17 +102,17 @@ func (m *AuthMiddleware) RequireAuth() fiber.Handler {
 		// Log successful authentication
 		m.auditLogger.LogAuthentication(
 			ctx,
-			&validatedKey.AccountID, &validatedKey.ID, &validatedKey.Name,
+			validationOutput.AccountID, validationOutput.APIKeyID, validationOutput.Name,
 			c.IP(), c.Get("User-Agent"),
 			true,
 			nil,
 		)
 
 		// Store account context
-		c.Locals("account_id", validatedKey.AccountID)
-		c.Locals("api_key_id", validatedKey.ID)
-		c.Locals("api_key_name", validatedKey.Name)
-		c.Locals("permissions", validatedKey.Permissions)
+		c.Locals("account_id", *validationOutput.AccountID)
+		c.Locals("api_key_id", *validationOutput.APIKeyID)
+		c.Locals("api_key_name", *validationOutput.Name)
+		c.Locals("permissions", []string(validationOutput.Permissions))
 
 		// Continue to next handler
 		return c.Next()

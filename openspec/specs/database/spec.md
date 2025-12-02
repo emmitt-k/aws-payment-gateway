@@ -15,11 +15,15 @@ The system SHALL provide database migration files to establish and manage the Po
 - **THEN** new migration files can be applied to evolve the schema without data loss
 
 ### Requirement: Core Financial Tables
-The system SHALL provide database tables for double-entry bookkeeping and financial transaction management.
+The system SHALL provide database tables for double-entry bookkeeping and financial transaction management, including account management.
 
 #### Scenario: Account management
 - **WHEN** storing company account information
-- **THEN** accounts table stores id, name, status, webhook_url, and timestamps
+- **THEN** accounts table in PostgreSQL stores id, name, status, webhook_url, and timestamps
+
+#### Scenario: Account authentication integration
+- **WHEN** validating API requests
+- **THEN** auth service queries PostgreSQL for account data while using DynamoDB for API key validation
 
 #### Scenario: Ledger account management
 - **WHEN** managing double-entry accounts
@@ -56,13 +60,17 @@ The system SHALL provide database tables for system configuration and operationa
 - **THEN** chain_cursors table stores scanning checkpoints
 
 ### Requirement: Database Constraints and Performance
-The system SHALL provide proper constraints and indexes for data integrity and performance.
+The system SHALL provide proper constraints and indexes for data integrity and performance, including account authentication queries.
 
 #### Scenario: Data integrity
-- **WHEN** inserting or updating data
-- **THEN** foreign key, unique, and check constraints ensure data consistency
+- **WHEN** inserting or updating account data
+- **THEN** foreign key, unique, and check constraints in PostgreSQL ensure data consistency
 
 #### Scenario: Query performance
-- **WHEN** querying financial data
-- **THEN** indexes optimize frequently accessed queries and joins
+- **WHEN** querying financial data or account information
+- **THEN** indexes optimize frequently accessed queries and joins in PostgreSQL
+
+#### Scenario: Authentication performance
+- **WHEN** validating API requests
+- **THEN** PostgreSQL account queries are optimized for frequent auth service lookups
 

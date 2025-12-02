@@ -23,20 +23,33 @@ func main() {
 	// Load configuration
 	config := loadConfig()
 
-	// Initialize database client
-	dbClient, err := db.NewDynamoDBClient(context.Background(), config.AWSRegion, config.DynamoDBTable)
+	// Initialize DynamoDB client for API keys
+	dynamoClient, err := db.NewDynamoDBClient(context.Background(), config.AWSRegion, config.DynamoDBTable)
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		log.Fatalf("Failed to initialize DynamoDB: %v", err)
 	}
 
+	// Initialize PostgreSQL client for accounts
+	postgresClient, err := db.NewPostgreSQLClient(context.Background(),
+		config.PostgreSQLHost,
+		config.PostgreSQLPort,
+		config.PostgreSQLUser,
+		config.PostgreSQLPassword,
+		config.PostgreSQLDBName,
+	)
+	if err != nil {
+		log.Fatalf("Failed to initialize PostgreSQL: %v", err)
+	}
+	defer postgresClient.Close()
+
 	// Initialize repositories
-	appRepo := repository.NewDynamoDBAppRepository(dbClient)
-	apiKeyRepo := repository.NewDynamoDBApiKeyRepository(dbClient)
+	appRepo := repository.NewPostgreSQLAppRepository(postgresClient)
+	apiKeyRepo := repository.NewDynamoDBApiKeyRepository(dynamoClient)
 
 	// Initialize use cases
 	registerApp := usecase.NewRegisterApp(appRepo, apiKeyRepo)
 	issueApiKey := usecase.NewIssueApiKey(appRepo, apiKeyRepo)
-	validateApiKey := usecase.NewValidateApiKey(apiKeyRepo)
+	validateApiKey := usecase.NewValidateApiKey(apiKeyRepo, appRepo)
 	getAPIKeys := usecase.NewGetAPIKeys(appRepo, apiKeyRepo)
 	revokeApiKey := usecase.NewRevokeApiKey(apiKeyRepo)
 
@@ -122,6 +135,12 @@ type Config struct {
 	Port          string
 	AWSRegion     string
 	DynamoDBTable string
+	// PostgreSQL configuration
+	PostgreSQLHost     string
+	PostgreSQLPort     string
+	PostgreSQLUser     string
+	PostgreSQLPassword string
+	PostgreSQLDBName   string
 }
 
 // loadConfig loads configuration from environment variables
@@ -130,6 +149,12 @@ func loadConfig() *Config {
 		Port:          getEnv("PORT", "8080"),
 		AWSRegion:     getEnv("AWS_REGION", "us-west-2"),
 		DynamoDBTable: getEnv("DYNAMODB_TABLE", "auth-service"),
+		// PostgreSQL configuration
+		PostgreSQLHost:     getEnv("POSTGRES_HOST", "localhost"),
+		PostgreSQLPort:     getEnv("POSTGRES_PORT", "5432"),
+		PostgreSQLUser:     getEnv("POSTGRES_USER", "postgres"),
+		PostgreSQLPassword: getEnv("POSTGRES_PASSWORD", "password"),
+		PostgreSQLDBName:   getEnv("POSTGRES_DB", "payment_gateway"),
 	}
 
 	return config

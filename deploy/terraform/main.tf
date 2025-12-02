@@ -3,10 +3,12 @@ provider "aws" {
   region = var.aws_region
   
   default_tags {
-    Name        = "${var.environment}-payment-gateway"
-    Environment = var.environment
-    Project     = var.tags["Project"]
-    ManagedBy   = var.tags["ManagedBy"]
+    tags = {
+      Name        = "${var.environment}-payment-gateway"
+      Environment = var.environment
+      Project     = var.tags["Project"]
+      ManagedBy   = var.tags["ManagedBy"]
+    }
   }
 }
 

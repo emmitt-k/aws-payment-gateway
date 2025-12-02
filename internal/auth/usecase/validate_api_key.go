@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/aws-payment-gateway/internal/auth/domain"
 	"github.com/aws-payment-gateway/internal/auth/repository"
 	"github.com/google/uuid"
 )
@@ -16,24 +17,28 @@ type ValidateApiKeyInput struct {
 
 // ValidateApiKeyOutput represents the output of API key validation
 type ValidateApiKeyOutput struct {
-	Valid       bool       `json:"valid"`
-	AccountID   *uuid.UUID `json:"account_id,omitempty"`
-	APIKeyID    *uuid.UUID `json:"api_key_id,omitempty"`
-	Name        *string    `json:"name,omitempty"`
-	Permissions []string   `json:"permissions,omitempty"`
-	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	Valid         bool                     `json:"valid"`
+	AccountID     *uuid.UUID               `json:"account_id,omitempty"`
+	APIKeyID      *uuid.UUID               `json:"api_key_id,omitempty"`
+	Name          *string                  `json:"name,omitempty"`
+	Permissions   domain.ApiKeyPermissions `json:"permissions,omitempty"`
+	LastUsedAt    *time.Time               `json:"last_used_at,omitempty"`
+	ExpiresAt     *time.Time               `json:"expires_at,omitempty"`
+	AccountName   *string                  `json:"account_name,omitempty"`
+	AccountStatus *string                  `json:"account_status,omitempty"`
 }
 
 // ValidateApiKey handles the business logic for validating API keys
 type ValidateApiKey struct {
 	apiKeyRepo repository.ApiKeyRepository
+	appRepo    repository.AppRepository
 }
 
 // NewValidateApiKey creates a new ValidateApiKey use case
-func NewValidateApiKey(apiKeyRepo repository.ApiKeyRepository) *ValidateApiKey {
+func NewValidateApiKey(apiKeyRepo repository.ApiKeyRepository, appRepo repository.AppRepository) *ValidateApiKey {
 	return &ValidateApiKey{
 		apiKeyRepo: apiKeyRepo,
+		appRepo:    appRepo,
 	}
 }
 
@@ -52,7 +57,8 @@ func (uc *ValidateApiKey) Execute(ctx context.Context, input ValidateApiKeyInput
 
 	// Create output
 	output := &ValidateApiKeyOutput{
-		Valid: apiKey != nil && apiKey.IsValid() && !apiKey.IsExpired(),
+		Valid:       apiKey != nil && apiKey.IsValid() && !apiKey.IsExpired(),
+		Permissions: domain.ApiKeyPermissions{}, // Initialize with empty permissions
 	}
 
 	if apiKey != nil {
@@ -62,6 +68,24 @@ func (uc *ValidateApiKey) Execute(ctx context.Context, input ValidateApiKeyInput
 		output.Permissions = apiKey.Permissions
 		output.LastUsedAt = apiKey.LastUsedAt
 		output.ExpiresAt = &apiKey.ExpiresAt
+
+		// Get account information from PostgreSQL
+		account, err := uc.appRepo.GetByID(ctx, apiKey.AccountID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get account: %w", err)
+		}
+
+		if account != nil {
+			accountName := account.Name
+			accountStatus := string(account.Status)
+			output.AccountName = &accountName
+			output.AccountStatus = &accountStatus
+
+			// Account must be active for API key to be valid
+			if !account.IsValid() {
+				output.Valid = false
+			}
+		}
 	}
 
 	return output, nil

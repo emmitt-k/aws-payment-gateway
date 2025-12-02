@@ -126,3 +126,16 @@ variable "dynamodb_tables" {
     }
   }
 }
+
+variable "postgres_username" {
+  description = "PostgreSQL master username"
+  type        = string
+  default     = "postgres"
+  sensitive   = true
+}
+
+variable "postgres_password" {
+  description = "PostgreSQL master password"
+  type        = string
+  sensitive   = true
+}

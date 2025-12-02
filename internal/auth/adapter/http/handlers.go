@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws-payment-gateway/internal/auth/adapter/http/dto"
 	"github.com/aws-payment-gateway/internal/auth/audit"
+	"github.com/aws-payment-gateway/internal/auth/domain"
 	"github.com/aws-payment-gateway/internal/auth/usecase"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -167,7 +168,7 @@ func (h *AuthHandler) IssueApiKey(c *fiber.Ctx) error {
 	input := usecase.IssueApiKeyInput{
 		AccountID:   req.AccountID,
 		Name:        req.Name,
-		Permissions: req.Permissions,
+		Permissions: domain.ApiKeyPermissions(req.Permissions),
 		ExpiresIn:   req.ExpiresIn,
 	}
 
@@ -194,7 +195,7 @@ func (h *AuthHandler) IssueApiKey(c *fiber.Ctx) error {
 		KeyHash:     output.KeyHash,
 		AccountID:   output.AccountID,
 		Name:        output.Name,
-		Permissions: output.Permissions,
+		Permissions: []string(output.Permissions),
 		Status:      output.Status,
 		ExpiresAt:   output.ExpiresAt,
 		CreatedAt:   output.CreatedAt,
@@ -257,7 +258,7 @@ func (h *AuthHandler) ValidateApiKey(c *fiber.Ctx) error {
 		AccountID:   output.AccountID,
 		APIKeyID:    output.APIKeyID,
 		Name:        output.Name,
-		Permissions: output.Permissions,
+		Permissions: []string(output.Permissions),
 		LastUsedAt:  output.LastUsedAt,
 		ExpiresAt:   output.ExpiresAt,
 	}
@@ -334,7 +335,7 @@ func (h *AuthHandler) GetAPIKeys(c *fiber.Ctx) error {
 		apiKeys[i] = dto.ApiKeyResponse{
 			APIKeyID:    apiKey.ID,
 			Name:        apiKey.Name,
-			Permissions: apiKey.Permissions,
+			Permissions: []string(apiKey.Permissions),
 			Status:      string(apiKey.Status),
 			LastUsedAt:  apiKey.LastUsedAt,
 			ExpiresAt:   apiKey.ExpiresAt,

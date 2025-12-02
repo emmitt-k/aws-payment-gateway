@@ -1,8 +1,4 @@
-# auth Specification
-
-## Purpose
-TBD - created by archiving change implement-auth-service. Update Purpose after archive.
-## Requirements
+## MODIFIED Requirements
 ### Requirement: Account Registration
 The system SHALL provide account registration functionality for external clients with account data stored in PostgreSQL.
 
@@ -33,17 +29,6 @@ The system SHALL provide API key issuance and lifecycle management for authentic
 - **WHEN** an account owner revokes an API key
 - **THEN** the system immediately invalidates the key in DynamoDB for all subsequent requests
 
-### Requirement: Authentication Middleware
-The system SHALL provide middleware for API key validation across all services.
-
-#### Scenario: Request authentication
-- **WHEN** a request includes a valid x-api-key header
-- **THEN** the middleware validates the key and attaches account_id to request context
-
-#### Scenario: Invalid key handling
-- **WHEN** a request includes an invalid or expired API key
-- **THEN** the middleware returns 401 Unauthorized with appropriate error details
-
 ### Requirement: Secure Key Storage
 The system SHALL store API keys securely in DynamoDB and account data in PostgreSQL with proper access controls.
 
@@ -62,26 +47,3 @@ The system SHALL store API keys securely in DynamoDB and account data in Postgre
 #### Scenario: Account lookup
 - **WHEN** retrieving account information
 - **THEN** the system queries PostgreSQL for account data
-
-### Requirement: Permission Management
-The system SHALL provide granular permission management for API keys.
-
-#### Scenario: Permission assignment
-- **WHEN** creating an API key
-- **THEN** the system assigns specific permissions based on account requirements
-
-#### Scenario: Permission validation
-- **WHEN** an API key attempts an operation beyond its permissions
-- **THEN** the system rejects the request with 403 Forbidden
-
-### Requirement: Audit Logging
-The system SHALL log all authentication-related actions for security and compliance.
-
-#### Scenario: Authentication events
-- **WHEN** API key validation succeeds or fails
-- **THEN** the system logs the event with timestamp, IP address, and outcome
-
-#### Scenario: Key lifecycle events
-- **WHEN** API keys are created, updated, or revoked
-- **THEN** the system records the action with actor details and timestamp
-

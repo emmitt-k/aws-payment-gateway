@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  # PostgreSQL for account storage
+  postgres:
+    image: postgres:15-alpine
+    container_name: payment-gateway-postgres
+    environment:
+      POSTGRES_DB: payment_gateway
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    networks:
+      - payment-gateway-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # DynamoDB Local for API keys and other data
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    container_name: payment-gateway-dynamodb
+    ports:
+      - "8000:8000"
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    networks:
+      - payment-gateway-network
+
+  # Auth Service
+  auth-svc:
+    build:
+      context: .
+      dockerfile: cmd/auth-svc/Dockerfile
+    container_name: payment-gateway-auth-svc
+    environment:
+      PORT: "8080"
+      AWS_REGION: "us-west-2"
+      DYNAMODB_TABLE: "auth-service"
+      DYNAMODB_ENDPOINT: "http://dynamodb:8000"
+      POSTGRES_HOST: "postgres"
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: "payment_gateway"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dynamodb:
+        condition: service_started
+    networks:
+      - payment-gateway-network
+    volumes:
+      - ./deploy/scripts:/app/scripts
+
+  # Migration runner (run once to setup database)
+  migrate:
+    image: migrate/migrate
+    container_name: payment-gateway-migrate
+    environment:
+      DATABASE_URL: "postgres://postgres:password@postgres:5432/payment_gateway?sslmode=disable"
+    command: [
+      "-path", "/migrations",
+      "-database", "postgres://postgres:password@postgres:5432/payment_gateway?sslmode=disable",
+      "up"
+    ]
+    volumes:
+      - ./migrations:/migrations
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - payment-gateway-network
+    profiles:
+      - migrate
+
+volumes:
+  postgres_data:
+
+networks:
+  payment-gateway-network:
+    driver: bridge

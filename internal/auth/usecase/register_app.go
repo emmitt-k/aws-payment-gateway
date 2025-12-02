@@ -56,11 +56,12 @@ func (uc *RegisterApp) Execute(ctx context.Context, input RegisterAppInput) (*Re
 
 	// Create new account
 	account := &domain.Account{
-		ID:        uuid.New(),
-		Name:      input.Name,
-		Status:    domain.AccountStatusActive,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:         uuid.New(),
+		Name:       input.Name,
+		Status:     domain.AccountStatusActive,
+		WebhookURL: input.WebhookURL,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
 	}
 
 	if err := uc.appRepo.Create(ctx, account); err != nil {

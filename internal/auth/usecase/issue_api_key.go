@@ -80,7 +80,7 @@ func (uc *IssueApiKey) Execute(ctx context.Context, input IssueApiKeyInput) (*Is
 		AccountID:   input.AccountID,
 		Name:        input.Name,
 		KeyHash:     string(hashedKey),
-		Permissions: input.Permissions,
+		Permissions: domain.ApiKeyPermissions(input.Permissions),
 		Status:      domain.ApiKeyStatusActive,
 		ExpiresAt:   expiresAt,
 		CreatedAt:   time.Now(),
