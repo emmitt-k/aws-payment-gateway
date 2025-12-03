@@ -228,11 +228,36 @@ resource "aws_dynamodb_table" "webhook_events" {
 resource "aws_dynamodb_table" "audit_logs" {
   name           = "audit_logs"
   billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "account_id"
-  range_key      = "timestamp"
+  hash_key       = "pk"
+  range_key      = "sk"
+
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+
+  attribute {
+    name = "sk"
+    type = "S"
+  }
 
   attribute {
     name = "account_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "api_key_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "api_key_name"
+    type = "S"
+  }
+
+  attribute {
+    name = "event_type"
     type = "S"
   }
 
@@ -242,33 +267,44 @@ resource "aws_dynamodb_table" "audit_logs" {
   }
 
   attribute {
-    name = "action"
-    type = "S"
-  }
-
-  attribute {
-    name = "actor_id"
-    type = "S"
-  }
-
-  attribute {
-    name = "actor_type"
-    type = "S"
-  }
-
-  attribute {
-    name = "data"
-    type = "S"
-  }
-
-  attribute {
     name = "ip_address"
+    type = "S"
+  }
+
+  attribute {
+    name = "user_agent"
+    type = "S"
+  }
+
+  attribute {
+    name = "success"
+    type = "S"
+  }
+
+  attribute {
+    name = "details"
     type = "S"
   }
 
   attribute {
     name = "ttl"
     type = "N"
+  }
+
+  # GSI for querying by account_id across all event types
+  global_secondary_index {
+    name     = "gsi_account_id"
+    hash_key = "account_id"
+    range_key = "timestamp"
+    projection_type = "ALL"
+  }
+
+  # GSI for querying by event_type across all accounts
+  global_secondary_index {
+    name     = "gsi_event_type"
+    hash_key = "event_type"
+    range_key = "timestamp"
+    projection_type = "ALL"
   }
 
   ttl {

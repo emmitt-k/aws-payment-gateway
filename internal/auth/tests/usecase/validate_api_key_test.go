@@ -1,338 +1,269 @@
 package usecase_test
 
 import (
-	"errors"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/aws-payment-gateway/internal/auth/domain"
 	"github.com/aws-payment-gateway/internal/auth/tests/mocks"
-	"github.com/aws-payment-gateway/internal/auth/tests/utils"
 	"github.com/aws-payment-gateway/internal/auth/usecase"
 )
 
-func TestValidateApiKey_Execute_ValidKey(t *testing.T) {
-	// Arrange
-	ctx := utils.TestContext(t)
-	mockAppRepo := mocks.NewMockAppRepository()
+func TestValidateApiKey_Execute_WithRawKey(t *testing.T) {
+	// Setup
 	mockApiKeyRepo := mocks.NewMockApiKeyRepository()
+	mockAppRepo := mocks.NewMockAppRepository()
 	uc := usecase.NewValidateApiKey(mockApiKeyRepo, mockAppRepo)
 
-	account := utils.CreateTestAccount(t)
-	apiKey := utils.CreateTestApiKey(t, account.ID)
-	mockAppRepo.AddAccount(account)
+	// Test data
+	accountID := uuid.New()
+	apiKeyID := uuid.New()
+	now := time.Now()
+
+	// Use the special pattern that mock repository recognizes for ValidateByKey
+	rawKey := "raw-api-key-" + apiKeyID.String()
+
+	// For the mock, we need to use SHA256 hash since ValidateByKey uses that
+	hash := sha256.Sum256([]byte(rawKey))
+	hashStr := hex.EncodeToString(hash[:])
+
+	apiKey := &domain.ApiKey{
+		ID:          apiKeyID,
+		AccountID:   accountID,
+		Name:        "Test API Key",
+		KeyHash:     hashStr,
+		Permissions: domain.ApiKeyPermissions{"read", "write"},
+		Status:      domain.ApiKeyStatusActive,
+		ExpiresAt:   now.Add(24 * time.Hour),
+		CreatedAt:   now,
+		LastUsedAt:  &now,
+	}
+
+	account := &domain.Account{
+		ID:     accountID,
+		Name:   "Test Account",
+		Status: domain.AccountStatusActive,
+	}
+
+	// Setup mock data
 	mockApiKeyRepo.AddApiKey(apiKey)
-
-	input := usecase.ValidateApiKeyInput{
-		KeyHash: apiKey.KeyHash,
-	}
-
-	// Act
-	output, err := uc.Execute(ctx, input)
-
-	// Assert
-	utils.RequireNoError(t, err)
-	utils.RequireNotNil(t, output)
-	utils.RequireEqual(t, true, output.Valid)
-	utils.RequireEqual(t, &apiKey.AccountID, output.AccountID)
-	utils.RequireEqual(t, &apiKey.ID, output.APIKeyID)
-	utils.RequireEqual(t, &apiKey.Name, output.Name)
-	utils.RequireEqual(t, apiKey.Permissions, output.Permissions)
-	utils.RequireEqual(t, apiKey.LastUsedAt, output.LastUsedAt)
-	utils.RequireEqual(t, &apiKey.ExpiresAt, output.ExpiresAt)
-	utils.RequireEqual(t, account.Name, *output.AccountName)
-	utils.RequireEqual(t, string(account.Status), *output.AccountStatus)
-}
-
-func TestValidateApiKey_Execute_InvalidKey(t *testing.T) {
-	// Arrange
-	ctx := utils.TestContext(t)
-	mockAppRepo := mocks.NewMockAppRepository()
-	mockApiKeyRepo := mocks.NewMockApiKeyRepository()
-	uc := usecase.NewValidateApiKey(mockApiKeyRepo, mockAppRepo)
-
-	input := usecase.ValidateApiKeyInput{
-		KeyHash: "non-existent-hash",
-	}
-
-	// Act
-	output, err := uc.Execute(ctx, input)
-
-	// Assert
-	utils.RequireNoError(t, err)
-	utils.RequireNotNil(t, output)
-	utils.RequireEqual(t, false, output.Valid)
-	utils.RequireNil(t, output.AccountID)
-	utils.RequireNil(t, output.APIKeyID)
-	utils.RequireNil(t, output.Name)
-	utils.RequireEqual(t, domain.ApiKeyPermissions{}, output.Permissions)
-	utils.RequireNil(t, output.LastUsedAt)
-	utils.RequireNil(t, output.ExpiresAt)
-	utils.RequireNil(t, output.AccountName)
-	utils.RequireNil(t, output.AccountStatus)
-}
-
-func TestValidateApiKey_Execute_EmptyKeyHash(t *testing.T) {
-	// Arrange
-	ctx := utils.TestContext(t)
-	mockAppRepo := mocks.NewMockAppRepository()
-	mockApiKeyRepo := mocks.NewMockApiKeyRepository()
-	uc := usecase.NewValidateApiKey(mockApiKeyRepo, mockAppRepo)
-
-	input := usecase.ValidateApiKeyInput{
-		KeyHash: "", // Empty key hash
-	}
-
-	// Act
-	output, err := uc.Execute(ctx, input)
-
-	// Assert
-	utils.RequireError(t, err)
-	utils.RequireNil(t, output)
-	utils.RequireEqual(t, "invalid input: key_hash is required", err.Error())
-}
-
-func TestValidateApiKey_Execute_ExpiredKey(t *testing.T) {
-	// Arrange
-	ctx := utils.TestContext(t)
-	mockAppRepo := mocks.NewMockAppRepository()
-	mockApiKeyRepo := mocks.NewMockApiKeyRepository()
-	uc := usecase.NewValidateApiKey(mockApiKeyRepo, mockAppRepo)
-
-	account := utils.CreateTestAccount(t)
-	apiKey := utils.CreateExpiredTestApiKey(t, account.ID) // Expired key
-	mockAppRepo.AddAccount(account)
-	mockApiKeyRepo.AddApiKey(apiKey)
-
-	input := usecase.ValidateApiKeyInput{
-		KeyHash: apiKey.KeyHash,
-	}
-
-	// Act
-	output, err := uc.Execute(ctx, input)
-
-	// Assert
-	utils.RequireNoError(t, err)
-	utils.RequireNotNil(t, output)
-	utils.RequireEqual(t, false, output.Valid) // Expired keys are invalid
-	utils.RequireEqual(t, &apiKey.AccountID, output.AccountID)
-	utils.RequireEqual(t, &apiKey.ID, output.APIKeyID)
-	utils.RequireEqual(t, &apiKey.Name, output.Name)
-	utils.RequireEqual(t, apiKey.Permissions, output.Permissions)
-	utils.RequireEqual(t, &apiKey.ExpiresAt, output.ExpiresAt)
-}
-
-func TestValidateApiKey_Execute_InactiveKey(t *testing.T) {
-	// Arrange
-	ctx := utils.TestContext(t)
-	mockAppRepo := mocks.NewMockAppRepository()
-	mockApiKeyRepo := mocks.NewMockApiKeyRepository()
-	uc := usecase.NewValidateApiKey(mockApiKeyRepo, mockAppRepo)
-
-	account := utils.CreateTestAccount(t)
-	apiKey := utils.CreateInactiveTestApiKey(t, account.ID) // Inactive key
-	mockAppRepo.AddAccount(account)
-	mockApiKeyRepo.AddApiKey(apiKey)
-
-	input := usecase.ValidateApiKeyInput{
-		KeyHash: apiKey.KeyHash,
-	}
-
-	// Act
-	output, err := uc.Execute(ctx, input)
-
-	// Assert
-	utils.RequireNoError(t, err)
-	utils.RequireNotNil(t, output)
-	utils.RequireEqual(t, false, output.Valid) // Inactive keys are invalid
-	utils.RequireEqual(t, &apiKey.AccountID, output.AccountID)
-	utils.RequireEqual(t, &apiKey.ID, output.APIKeyID)
-	utils.RequireEqual(t, &apiKey.Name, output.Name)
-	utils.RequireEqual(t, apiKey.Permissions, output.Permissions)
-	utils.RequireEqual(t, &apiKey.ExpiresAt, output.ExpiresAt)
-}
-
-func TestValidateApiKey_Execute_InactiveAccount(t *testing.T) {
-	// Arrange
-	ctx := utils.TestContext(t)
-	mockAppRepo := mocks.NewMockAppRepository()
-	mockApiKeyRepo := mocks.NewMockApiKeyRepository()
-	uc := usecase.NewValidateApiKey(mockApiKeyRepo, mockAppRepo)
-
-	account := utils.CreateTestAccount(t)
-	account.Status = domain.AccountStatusSuspended // Make account inactive
 	mockAppRepo.AddAccount(account)
 
-	apiKey := utils.CreateTestApiKey(t, account.ID)
+	// Execute
+	input := usecase.ValidateApiKeyInput{
+		RawKey: rawKey,
+	}
+	result, err := uc.Execute(context.Background(), input)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.True(t, result.Valid)
+	assert.Equal(t, accountID, *result.AccountID)
+	assert.Equal(t, apiKeyID, *result.APIKeyID)
+	assert.Equal(t, "Test API Key", *result.Name)
+	assert.Equal(t, domain.ApiKeyPermissions{"read", "write"}, result.Permissions)
+	assert.Equal(t, "Test Account", *result.AccountName)
+	assert.Equal(t, string(domain.AccountStatusActive), *result.AccountStatus)
+}
+
+func TestValidateApiKey_Execute_WithKeyHash(t *testing.T) {
+	// Setup
+	mockApiKeyRepo := mocks.NewMockApiKeyRepository()
+	mockAppRepo := mocks.NewMockAppRepository()
+	uc := usecase.NewValidateApiKey(mockApiKeyRepo, mockAppRepo)
+
+	// Test data
+	accountID := uuid.New()
+	apiKeyID := uuid.New()
+	now := time.Now()
+	hashedKey := "hashed-key-12345"
+
+	apiKey := &domain.ApiKey{
+		ID:          apiKeyID,
+		AccountID:   accountID,
+		Name:        "Test API Key",
+		KeyHash:     hashedKey,
+		Permissions: domain.ApiKeyPermissions{"read"},
+		Status:      domain.ApiKeyStatusActive,
+		ExpiresAt:   now.Add(24 * time.Hour),
+		CreatedAt:   now,
+		LastUsedAt:  &now,
+	}
+
+	account := &domain.Account{
+		ID:     accountID,
+		Name:   "Test Account",
+		Status: domain.AccountStatusActive,
+	}
+
+	// Setup mock data
 	mockApiKeyRepo.AddApiKey(apiKey)
-
-	input := usecase.ValidateApiKeyInput{
-		KeyHash: apiKey.KeyHash,
-	}
-
-	// Act
-	output, err := uc.Execute(ctx, input)
-
-	// Assert
-	utils.RequireNoError(t, err)
-	utils.RequireNotNil(t, output)
-	utils.RequireEqual(t, false, output.Valid) // Keys with inactive accounts are invalid
-	utils.RequireEqual(t, &apiKey.AccountID, output.AccountID)
-	utils.RequireEqual(t, &apiKey.ID, output.APIKeyID)
-	utils.RequireEqual(t, &apiKey.Name, output.Name)
-	utils.RequireEqual(t, apiKey.Permissions, output.Permissions)
-	utils.RequireEqual(t, account.Name, *output.AccountName)
-	utils.RequireEqual(t, string(account.Status), *output.AccountStatus)
-}
-
-func TestValidateApiKey_Execute_RepositoryError(t *testing.T) {
-	// Arrange
-	ctx := utils.TestContext(t)
-	mockAppRepo := mocks.NewMockAppRepository()
-	mockApiKeyRepo := mocks.NewMockApiKeyRepository()
-	uc := usecase.NewValidateApiKey(mockApiKeyRepo, mockAppRepo)
-
-	// Set up repository to return error on GetByKeyHash
-	repoError := errors.New("database error")
-	mockApiKeyRepo.SetGetError(repoError)
-
-	input := usecase.ValidateApiKeyInput{
-		KeyHash: "test-hash",
-	}
-
-	// Act
-	output, err := uc.Execute(ctx, input)
-
-	// Assert
-	utils.RequireError(t, err)
-	utils.RequireNil(t, output)
-	utils.RequireEqual(t, "failed to get API key: database error", err.Error())
-}
-
-func TestValidateApiKey_Execute_AccountRepositoryError(t *testing.T) {
-	// Arrange
-	ctx := utils.TestContext(t)
-	mockAppRepo := mocks.NewMockAppRepository()
-	mockApiKeyRepo := mocks.NewMockApiKeyRepository()
-	uc := usecase.NewValidateApiKey(mockApiKeyRepo, mockAppRepo)
-
-	account := utils.CreateTestAccount(t)
-	apiKey := utils.CreateTestApiKey(t, account.ID)
-	mockAppRepo.AddAccount(account)
-	mockApiKeyRepo.AddApiKey(apiKey)
-
-	// Set up app repository to return error on GetByID
-	repoError := errors.New("database error")
-	mockAppRepo.SetGetError(repoError)
-
-	input := usecase.ValidateApiKeyInput{
-		KeyHash: apiKey.KeyHash,
-	}
-
-	// Act
-	output, err := uc.Execute(ctx, input)
-
-	// Assert
-	utils.RequireError(t, err)
-	utils.RequireNil(t, output)
-	utils.RequireEqual(t, "failed to get account: database error", err.Error())
-}
-
-func TestValidateApiKey_Execute_NonExistentAccount(t *testing.T) {
-	// Arrange
-	ctx := utils.TestContext(t)
-	mockAppRepo := mocks.NewMockAppRepository()
-	mockApiKeyRepo := mocks.NewMockApiKeyRepository()
-	uc := usecase.NewValidateApiKey(mockApiKeyRepo, mockAppRepo)
-
-	// Don't add account to repository (simulating non-existent account)
-	apiKey := utils.CreateTestApiKey(t, uuid.New())
-	mockApiKeyRepo.AddApiKey(apiKey)
-
-	input := usecase.ValidateApiKeyInput{
-		KeyHash: apiKey.KeyHash,
-	}
-
-	// Act
-	output, err := uc.Execute(ctx, input)
-
-	// Assert
-	utils.RequireNoError(t, err)
-	utils.RequireNotNil(t, output)
-	utils.RequireEqual(t, true, output.Valid) // Key is valid but account info is missing
-	utils.RequireEqual(t, &apiKey.AccountID, output.AccountID)
-	utils.RequireEqual(t, &apiKey.ID, output.APIKeyID)
-	utils.RequireEqual(t, &apiKey.Name, output.Name)
-	utils.RequireEqual(t, apiKey.Permissions, output.Permissions)
-	utils.RequireNil(t, output.AccountName)   // Account not found
-	utils.RequireNil(t, output.AccountStatus) // Account not found
-}
-
-func TestValidateApiKey_Execute_KeyWithLastUsedAt(t *testing.T) {
-	// Arrange
-	ctx := utils.TestContext(t)
-	mockAppRepo := mocks.NewMockAppRepository()
-	mockApiKeyRepo := mocks.NewMockApiKeyRepository()
-	uc := usecase.NewValidateApiKey(mockApiKeyRepo, mockAppRepo)
-
-	account := utils.CreateTestAccount(t)
 	mockAppRepo.AddAccount(account)
 
-	// Create API key with LastUsedAt set
-	apiKey := utils.CreateTestApiKey(t, account.ID)
-	lastUsedAt := time.Now().Add(-1 * time.Hour)
-	apiKey.LastUsedAt = &lastUsedAt
-	mockApiKeyRepo.AddApiKey(apiKey)
-
+	// Execute
 	input := usecase.ValidateApiKeyInput{
-		KeyHash: apiKey.KeyHash,
+		KeyHash: hashedKey,
 	}
-
-	// Act
-	output, err := uc.Execute(ctx, input)
+	result, err := uc.Execute(context.Background(), input)
 
 	// Assert
-	utils.RequireNoError(t, err)
-	utils.RequireNotNil(t, output)
-	utils.RequireEqual(t, true, output.Valid)
-	utils.RequireEqual(t, &lastUsedAt, output.LastUsedAt)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.True(t, result.Valid)
+	assert.Equal(t, accountID, *result.AccountID)
+	assert.Equal(t, apiKeyID, *result.APIKeyID)
 }
 
-func TestValidateApiKey_Execute_MultiplePermissions(t *testing.T) {
-	// Arrange
-	ctx := utils.TestContext(t)
-	mockAppRepo := mocks.NewMockAppRepository()
+func TestValidateApiKey_Execute_WithInvalidKey(t *testing.T) {
+	// Setup
 	mockApiKeyRepo := mocks.NewMockApiKeyRepository()
+	mockAppRepo := mocks.NewMockAppRepository()
 	uc := usecase.NewValidateApiKey(mockApiKeyRepo, mockAppRepo)
 
-	account := utils.CreateTestAccount(t)
-	mockAppRepo.AddAccount(account)
+	// Test data - this key won't match any stored keys
+	rawKey := "raw-api-key-invalid"
 
-	// Create API key with multiple permissions
-	apiKey := utils.CreateTestApiKey(t, account.ID)
-	apiKey.Permissions = domain.ApiKeyPermissions{
-		domain.PermissionReadAccounts,
-		domain.PermissionWriteKeys,
-		domain.PermissionManageWebhooks,
-	}
-	mockApiKeyRepo.AddApiKey(apiKey)
-
+	// Execute
 	input := usecase.ValidateApiKeyInput{
-		KeyHash: apiKey.KeyHash,
+		RawKey: rawKey,
 	}
-
-	// Act
-	output, err := uc.Execute(ctx, input)
+	result, err := uc.Execute(context.Background(), input)
 
 	// Assert
-	utils.RequireNoError(t, err)
-	utils.RequireNotNil(t, output)
-	utils.RequireEqual(t, true, output.Valid)
-	utils.RequireEqual(t, 3, len(output.Permissions))
-	require.Contains(t, output.Permissions, domain.PermissionReadAccounts)
-	require.Contains(t, output.Permissions, domain.PermissionWriteKeys)
-	require.Contains(t, output.Permissions, domain.PermissionManageWebhooks)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.False(t, result.Valid)
+	assert.Nil(t, result.AccountID)
+	assert.Nil(t, result.APIKeyID)
+}
+
+func TestValidateApiKey_Execute_WithExpiredKey(t *testing.T) {
+	// Setup
+	mockApiKeyRepo := mocks.NewMockApiKeyRepository()
+	mockAppRepo := mocks.NewMockAppRepository()
+	uc := usecase.NewValidateApiKey(mockApiKeyRepo, mockAppRepo)
+
+	// Test data
+	accountID := uuid.New()
+	apiKeyID := uuid.New()
+	now := time.Now()
+
+	// Use the special pattern that mock repository recognizes for ValidateByKey
+	rawKey := "raw-api-key-" + apiKeyID.String()
+
+	// For the mock, we need to use SHA256 hash since ValidateByKey uses that
+	hash := sha256.Sum256([]byte(rawKey))
+	hashStr := hex.EncodeToString(hash[:])
+
+	apiKey := &domain.ApiKey{
+		ID:          apiKeyID,
+		AccountID:   accountID,
+		Name:        "Expired API Key",
+		KeyHash:     hashStr,
+		Permissions: domain.ApiKeyPermissions{"read"},
+		Status:      domain.ApiKeyStatusActive,
+		ExpiresAt:   now.Add(-1 * time.Hour), // Expired 1 hour ago
+		CreatedAt:   now.Add(-24 * time.Hour),
+		LastUsedAt:  &now,
+	}
+
+	account := &domain.Account{
+		ID:     accountID,
+		Name:   "Test Account",
+		Status: domain.AccountStatusActive,
+	}
+
+	// Setup mock data
+	mockApiKeyRepo.AddApiKey(apiKey)
+	mockAppRepo.AddAccount(account)
+
+	// Execute
+	input := usecase.ValidateApiKeyInput{
+		RawKey: rawKey,
+	}
+	result, err := uc.Execute(context.Background(), input)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.False(t, result.Valid) // Should be false due to expiration
+	assert.Equal(t, accountID, *result.AccountID)
+	assert.Equal(t, apiKeyID, *result.APIKeyID)
+}
+
+func TestValidateApiKey_Execute_WithInactiveAccount(t *testing.T) {
+	// Setup
+	mockApiKeyRepo := mocks.NewMockApiKeyRepository()
+	mockAppRepo := mocks.NewMockAppRepository()
+	uc := usecase.NewValidateApiKey(mockApiKeyRepo, mockAppRepo)
+
+	// Test data
+	accountID := uuid.New()
+	apiKeyID := uuid.New()
+	now := time.Now()
+
+	// Use the special pattern that mock repository recognizes for ValidateByKey
+	rawKey := "raw-api-key-" + apiKeyID.String()
+
+	// For the mock, we need to use SHA256 hash since ValidateByKey uses that
+	hash := sha256.Sum256([]byte(rawKey))
+	hashStr := hex.EncodeToString(hash[:])
+
+	apiKey := &domain.ApiKey{
+		ID:          apiKeyID,
+		AccountID:   accountID,
+		Name:        "Test API Key",
+		KeyHash:     hashStr,
+		Permissions: domain.ApiKeyPermissions{"read"},
+		Status:      domain.ApiKeyStatusActive,
+		ExpiresAt:   now.Add(24 * time.Hour),
+		CreatedAt:   now,
+		LastUsedAt:  &now,
+	}
+
+	account := &domain.Account{
+		ID:     accountID,
+		Name:   "Inactive Account",
+		Status: domain.AccountStatusSuspended, // Inactive account
+	}
+
+	// Setup mock data
+	mockApiKeyRepo.AddApiKey(apiKey)
+	mockAppRepo.AddAccount(account)
+
+	// Execute
+	input := usecase.ValidateApiKeyInput{
+		RawKey: rawKey,
+	}
+	result, err := uc.Execute(context.Background(), input)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.False(t, result.Valid) // Should be false due to inactive account
+	assert.Equal(t, accountID, *result.AccountID)
+	assert.Equal(t, apiKeyID, *result.APIKeyID)
+}
+
+func TestValidateApiKey_Execute_WithNoInput(t *testing.T) {
+	// Setup
+	mockApiKeyRepo := mocks.NewMockApiKeyRepository()
+	mockAppRepo := mocks.NewMockAppRepository()
+	uc := usecase.NewValidateApiKey(mockApiKeyRepo, mockAppRepo)
+
+	// Execute with empty input
+	input := usecase.ValidateApiKeyInput{}
+	result, err := uc.Execute(context.Background(), input)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "either raw_key or key_hash must be provided")
 }

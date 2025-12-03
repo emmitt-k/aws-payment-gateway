@@ -21,7 +21,7 @@ type AuthHandler struct {
 	validateApiKey *usecase.ValidateApiKey
 	getAPIKeys     *usecase.GetAPIKeys
 	revokeApiKey   *usecase.RevokeApiKey
-	auditLogger    *audit.AuditLogger
+	auditLogger    audit.AuditLoggerInterface
 }
 
 // NewAuthHandler creates a new AuthHandler
@@ -31,6 +31,7 @@ func NewAuthHandler(
 	validateApiKey *usecase.ValidateApiKey,
 	getAPIKeys *usecase.GetAPIKeys,
 	revokeApiKey *usecase.RevokeApiKey,
+	auditLogger audit.AuditLoggerInterface,
 ) *AuthHandler {
 	return &AuthHandler{
 		registerApp:    registerApp,
@@ -38,7 +39,7 @@ func NewAuthHandler(
 		validateApiKey: validateApiKey,
 		getAPIKeys:     getAPIKeys,
 		revokeApiKey:   revokeApiKey,
-		auditLogger:    audit.NewAuditLogger(),
+		auditLogger:    auditLogger,
 	}
 }
 
@@ -175,6 +176,19 @@ func (h *AuthHandler) IssueApiKey(c *fiber.Ctx) error {
 	// Execute use case
 	output, err := h.issueApiKey.Execute(ctx, input)
 	if err != nil {
+		// Log failed API key creation attempt
+		h.auditLogger.LogAPIKeyCreation(
+			ctx,
+			&req.AccountID,
+			nil,
+			&req.Name,
+			c.IP(), c.Get("User-Agent"),
+			map[string]string{
+				"error":   err.Error(),
+				"success": "false",
+			},
+		)
+
 		if err.Error() == "account not found or inactive" {
 			return c.Status(fiber.StatusNotFound).JSON(dto.ErrorResponse{
 				Error:   "account_not_found",
@@ -188,6 +202,16 @@ func (h *AuthHandler) IssueApiKey(c *fiber.Ctx) error {
 			Details: err.Error(),
 		})
 	}
+
+	// Log successful API key creation
+	h.auditLogger.LogAPIKeyCreation(
+		ctx,
+		&output.AccountID,
+		&output.APIKeyID,
+		&output.Name,
+		c.IP(), c.Get("User-Agent"),
+		map[string]string{"success": "true"},
+	)
 
 	// Convert to response
 	response := dto.IssueApiKeyResponse{
@@ -377,6 +401,23 @@ func (h *AuthHandler) RevokeApiKey(c *fiber.Ctx) error {
 		})
 	}
 
+	// Get account ID from context for audit logging
+	accountID, err := GetAccountID(c)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to get account context",
+			Details: err.Error(),
+		})
+	}
+
+	// Get API key name from context for audit logging
+	apiKeyName, err := GetAPIKeyName(c)
+	if err != nil {
+		// Continue even if we can't get the name
+		apiKeyName = ""
+	}
+
 	// Convert to use case input
 	input := usecase.RevokeApiKeyInput{
 		APIKeyID: apiKeyID,
@@ -385,6 +426,19 @@ func (h *AuthHandler) RevokeApiKey(c *fiber.Ctx) error {
 	// Execute use case
 	_, err = h.revokeApiKey.Execute(ctx, input)
 	if err != nil {
+		// Log failed API key revocation attempt
+		h.auditLogger.LogAPIKeyRevocation(
+			ctx,
+			&accountID,
+			&apiKeyID,
+			&apiKeyName,
+			c.IP(), c.Get("User-Agent"),
+			map[string]string{
+				"error":   err.Error(),
+				"success": "false",
+			},
+		)
+
 		if err.Error() == "API key not found" {
 			return c.Status(fiber.StatusNotFound).JSON(dto.ErrorResponse{
 				Error:   "api_key_not_found",
@@ -398,6 +452,16 @@ func (h *AuthHandler) RevokeApiKey(c *fiber.Ctx) error {
 			Details: err.Error(),
 		})
 	}
+
+	// Log successful API key revocation
+	h.auditLogger.LogAPIKeyRevocation(
+		ctx,
+		&accountID,
+		&apiKeyID,
+		&apiKeyName,
+		c.IP(), c.Get("User-Agent"),
+		map[string]string{"success": "true"},
+	)
 
 	return c.Status(fiber.StatusNoContent).Send(nil)
 }

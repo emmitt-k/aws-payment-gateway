@@ -14,6 +14,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/recover"
 
 	"github.com/aws-payment-gateway/internal/auth/adapter/http"
+	"github.com/aws-payment-gateway/internal/auth/audit"
 	"github.com/aws-payment-gateway/internal/auth/repository"
 	"github.com/aws-payment-gateway/internal/auth/usecase"
 	"github.com/aws-payment-gateway/internal/common/db"
@@ -27,6 +28,12 @@ func main() {
 	dynamoClient, err := db.NewDynamoDBClient(context.Background(), config.AWSRegion, config.DynamoDBTable)
 	if err != nil {
 		log.Fatalf("Failed to initialize DynamoDB: %v", err)
+	}
+
+	// Initialize DynamoDB client for audit logs
+	auditDynamoClient, err := db.NewDynamoDBClient(context.Background(), config.AWSRegion, config.AuditLogsTable)
+	if err != nil {
+		log.Fatalf("Failed to initialize audit DynamoDB: %v", err)
 	}
 
 	// Initialize PostgreSQL client for accounts
@@ -46,6 +53,9 @@ func main() {
 	appRepo := repository.NewPostgreSQLAppRepository(postgresClient)
 	apiKeyRepo := repository.NewDynamoDBApiKeyRepository(dynamoClient)
 
+	// Initialize audit logger
+	auditLogger := audit.NewDynamoDBAuditLogger(auditDynamoClient)
+
 	// Initialize use cases
 	registerApp := usecase.NewRegisterApp(appRepo, apiKeyRepo)
 	issueApiKey := usecase.NewIssueApiKey(appRepo, apiKeyRepo)
@@ -54,8 +64,8 @@ func main() {
 	revokeApiKey := usecase.NewRevokeApiKey(apiKeyRepo)
 
 	// Initialize handlers
-	authHandler := http.NewAuthHandler(registerApp, issueApiKey, validateApiKey, getAPIKeys, revokeApiKey)
-	authMiddleware := http.NewAuthMiddleware(validateApiKey, apiKeyRepo)
+	authHandler := http.NewAuthHandler(registerApp, issueApiKey, validateApiKey, getAPIKeys, revokeApiKey, auditLogger)
+	authMiddleware := http.NewAuthMiddleware(validateApiKey, apiKeyRepo, auditLogger)
 
 	// Initialize Fiber app
 	app := fiber.New(fiber.Config{
@@ -132,9 +142,10 @@ func main() {
 
 // Config represents the application configuration
 type Config struct {
-	Port          string
-	AWSRegion     string
-	DynamoDBTable string
+	Port           string
+	AWSRegion      string
+	DynamoDBTable  string
+	AuditLogsTable string
 	// PostgreSQL configuration
 	PostgreSQLHost     string
 	PostgreSQLPort     string
@@ -146,9 +157,10 @@ type Config struct {
 // loadConfig loads configuration from environment variables
 func loadConfig() *Config {
 	config := &Config{
-		Port:          getEnv("PORT", "8080"),
-		AWSRegion:     getEnv("AWS_REGION", "us-west-2"),
-		DynamoDBTable: getEnv("DYNAMODB_TABLE", "auth-service"),
+		Port:           getEnv("PORT", "8080"),
+		AWSRegion:      getEnv("AWS_REGION", "us-west-2"),
+		DynamoDBTable:  getEnv("DYNAMODB_TABLE", "auth-service"),
+		AuditLogsTable: getEnv("AUDIT_LOGS_TABLE", "audit_logs"),
 		// PostgreSQL configuration
 		PostgreSQLHost:     getEnv("POSTGRES_HOST", "localhost"),
 		PostgreSQLPort:     getEnv("POSTGRES_PORT", "5432"),

@@ -12,7 +12,10 @@ import (
 
 // ValidateApiKeyInput represents the input for API key validation
 type ValidateApiKeyInput struct {
-	KeyHash string `json:"key_hash" validate:"required"`
+	// RawKey is the raw API key provided by the client
+	RawKey string `json:"raw_key" validate:"required"`
+	// KeyHash is the pre-hashed API key (deprecated, use RawKey instead)
+	KeyHash string `json:"key_hash,omitempty"`
 }
 
 // ValidateApiKeyOutput represents the output of API key validation
@@ -49,10 +52,24 @@ func (uc *ValidateApiKey) Execute(ctx context.Context, input ValidateApiKeyInput
 		return nil, fmt.Errorf("invalid input: %w", err)
 	}
 
-	// Get API key by hash
-	apiKey, err := uc.apiKeyRepo.GetByKeyHash(ctx, input.KeyHash)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get API key: %w", err)
+	var apiKey *domain.ApiKey
+	var err error
+
+	// Handle both raw key and hash for backward compatibility
+	if input.RawKey != "" {
+		// Use the new validation method that accepts raw keys
+		apiKey, err = uc.apiKeyRepo.ValidateByKey(ctx, input.RawKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to validate API key: %w", err)
+		}
+	} else if input.KeyHash != "" {
+		// Legacy support for pre-hashed keys
+		apiKey, err = uc.apiKeyRepo.GetByKeyHash(ctx, input.KeyHash)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get API key: %w", err)
+		}
+	} else {
+		return nil, fmt.Errorf("either raw_key or key_hash must be provided")
 	}
 
 	// Create output
@@ -93,8 +110,8 @@ func (uc *ValidateApiKey) Execute(ctx context.Context, input ValidateApiKeyInput
 
 // validateInput validates the API key validation input
 func (uc *ValidateApiKey) validateInput(input ValidateApiKeyInput) error {
-	if input.KeyHash == "" {
-		return fmt.Errorf("key_hash is required")
+	if input.RawKey == "" && input.KeyHash == "" {
+		return fmt.Errorf("either raw_key or key_hash must be provided")
 	}
 
 	return nil

@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -9,9 +11,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/aws-payment-gateway/internal/auth/domain"
+	"github.com/aws-payment-gateway/internal/auth/security"
 	"github.com/aws-payment-gateway/internal/common/db"
 )
 
@@ -33,6 +35,8 @@ type DynamoDBApiKey struct {
 	PK     string `dynamodbav:"pk" json:"pk"`
 	SK     string `dynamodbav:"sk" json:"sk"`
 	GSI1PK string `dynamodbav:"gsi1pk" json:"gsi1pk"` // For lookup by key hash
+	GSI2PK string `dynamodbav:"gsi2pk" json:"gsi2pk"` // For lookup by API key ID
+	TTL    int64  `dynamodbav:"ttl" json:"ttl"`       // For automatic expiration
 }
 
 // Create creates a new API key
@@ -41,35 +45,36 @@ func (r *DynamoDBApiKeyRepository) Create(ctx context.Context, apiKey *domain.Ap
 	now := time.Now()
 	apiKey.CreatedAt = now
 
-	// Create DynamoDB entity with composite key
+	// Create DynamoDB entity with composite key and TTL
 	dynamoApiKey := &DynamoDBApiKey{
 		ApiKey: *apiKey,
 		PK:     fmt.Sprintf("ACCOUNT#%s", apiKey.AccountID.String()),
 		SK:     fmt.Sprintf("APIKEY#%s", apiKey.ID.String()),
 		GSI1PK: fmt.Sprintf("KEYHASH#%s", apiKey.KeyHash),
+		GSI2PK: fmt.Sprintf("APIKEY#%s", apiKey.ID.String()),
+		TTL:    apiKey.ExpiresAt.Unix(), // Set TTL to expiration time
 	}
 
 	return r.client.PutItem(ctx, dynamoApiKey)
 }
 
-// GetByID retrieves an API key by its ID
+// GetByID retrieves an API key by its ID using a GSI for efficient lookup
 func (r *DynamoDBApiKeyRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.ApiKey, error) {
-	// We need the account ID to create the full key, so we'll need to query
-	// In a real implementation, you might have a different key structure or GSI
-	// For now, we'll scan for the API key by ID (not efficient for production)
-	input := &dynamodb.ScanInput{
-		TableName:        aws.String(r.client.GetTableName()),
-		FilterExpression: aws.String("id = :id"),
+	// Use GSI2 for API key ID lookup (gsi2pk = APIKEY#id)
+	input := &dynamodb.QueryInput{
+		TableName:              aws.String(r.client.GetTableName()),
+		IndexName:              aws.String("gsi2"), // GSI for API key ID lookup
+		KeyConditionExpression: aws.String("gsi2pk = :gsi2pk"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":id": &types.AttributeValueMemberS{Value: id.String()},
+			":gsi2pk": &types.AttributeValueMemberS{Value: fmt.Sprintf("APIKEY#%s", id.String())},
 		},
 		Limit: aws.Int32(1),
 	}
 
 	var results []DynamoDBApiKey
-	err := r.client.ScanItems(ctx, input, &results)
+	err := r.client.QueryItems(ctx, input, &results)
 	if err != nil {
-		return nil, fmt.Errorf("failed to scan for API key: %w", err)
+		return nil, fmt.Errorf("failed to query API key by ID: %w", err)
 	}
 
 	if len(results) == 0 {
@@ -153,61 +158,66 @@ func (r *DynamoDBApiKeyRepository) GetByAccountID(ctx context.Context, accountID
 }
 
 // ValidateByKey validates an API key by comparing the raw key with stored hashes
+// This method uses SHA256 for consistent hashing and efficient GSI lookup
 func (r *DynamoDBApiKeyRepository) ValidateByKey(ctx context.Context, rawKey string) (*domain.ApiKey, error) {
-	// In a production system, you would want to optimize this with a GSI or caching
-	// For now, we'll scan all active API keys and compare hashes
-	input := &dynamodb.ScanInput{
-		TableName:        aws.String(r.client.GetTableName()),
-		FilterExpression: aws.String("contains(sk, :sk_prefix) AND #s = :status"),
-		ExpressionAttributeNames: map[string]string{
-			"#s": "status",
-		},
+	// Use SHA256 for consistent hashing (bcrypt generates different hashes each time)
+	hash := sha256.Sum256([]byte(rawKey))
+	hashStr := hex.EncodeToString(hash[:])
+
+	// Use GSI1 for efficient key hash lookup
+	input := &dynamodb.QueryInput{
+		TableName:              aws.String(r.client.GetTableName()),
+		IndexName:              aws.String("gsi1"), // GSI for key hash lookup
+		KeyConditionExpression: aws.String("gsi1pk = :gsi1pk"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":sk_prefix": &types.AttributeValueMemberS{Value: "APIKEY#"},
-			":status":    &types.AttributeValueMemberS{Value: string(domain.ApiKeyStatusActive)},
+			":gsi1pk": &types.AttributeValueMemberS{Value: fmt.Sprintf("KEYHASH#%s", hashStr)},
 		},
+		Limit: aws.Int32(1),
 	}
 
 	var results []DynamoDBApiKey
-	err := r.client.ScanItems(ctx, input, &results)
+	err := r.client.QueryItems(ctx, input, &results)
 	if err != nil {
-		return nil, fmt.Errorf("failed to scan API keys: %w", err)
+		return nil, fmt.Errorf("failed to query API key by hash: %w", err)
 	}
 
-	// Check each API key hash against the provided raw key
-	for _, result := range results {
-		if err := bcrypt.CompareHashAndPassword([]byte(result.KeyHash), []byte(rawKey)); err == nil {
-			// Found a match, update last used timestamp
-			now := time.Now()
-			result.LastUsedAt = &now
-
-			// Update the last used timestamp
-			key, err := db.CreateCompositeKey("pk", result.PK, "sk", result.SK)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create key for update: %w", err)
-			}
-
-			updateExpr := "SET last_used_at = :l"
-			exprAttrValues := map[string]types.AttributeValue{
-				":l": &types.AttributeValueMemberS{Value: now.Format(time.RFC3339)},
-			}
-
-			err = r.client.UpdateItem(ctx, key, updateExpr, nil, exprAttrValues, nil)
-			if err != nil {
-				// Log error but don't fail the request
-				fmt.Printf("Failed to update last_used_at for API key: %v\n", err)
-			}
-
-			// Check if the key is expired
-			if result.IsExpired() {
-				return nil, nil // Key is expired
-			}
-
-			return &result.ApiKey, nil
-		}
+	if len(results) == 0 {
+		return nil, nil // API key not found
 	}
 
-	return nil, nil // No matching key found
+	// Use constant-time comparison to prevent timing attacks
+	storedHash := results[0].KeyHash
+	if !security.ConstantTimeCompare(hashStr, storedHash) {
+		return nil, nil // Hash mismatch, treat as not found
+	}
+
+	// Check if the key is expired
+	if results[0].IsExpired() {
+		return nil, nil // Key is expired, treat as not found
+	}
+
+	// Update last used timestamp
+	now := time.Now()
+	results[0].LastUsedAt = &now
+
+	// Update the last used timestamp
+	key, err := db.CreateCompositeKey("pk", results[0].PK, "sk", results[0].SK)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create key for update: %w", err)
+	}
+
+	updateExpr := "SET last_used_at = :l"
+	exprAttrValues := map[string]types.AttributeValue{
+		":l": &types.AttributeValueMemberS{Value: now.Format(time.RFC3339)},
+	}
+
+	err = r.client.UpdateItem(ctx, key, updateExpr, nil, exprAttrValues, nil)
+	if err != nil {
+		// Log error but don't fail the request
+		fmt.Printf("Failed to update last_used_at for API key: %v\n", err)
+	}
+
+	return &results[0].ApiKey, nil
 }
 
 // Update updates an existing API key
@@ -217,18 +227,20 @@ func (r *DynamoDBApiKeyRepository) Update(ctx context.Context, apiKey *domain.Ap
 		return fmt.Errorf("failed to create key: %w", err)
 	}
 
-	updateExpr := "SET #n = :n, #p = :p, #s = :s, #e = :e"
+	updateExpr := "SET #n = :n, #p = :p, #s = :s, #e = :e, #t = :t"
 	exprAttrNames := map[string]string{
 		"#n": "name",
 		"#p": "permissions",
 		"#s": "status",
 		"#e": "expires_at",
+		"#t": "ttl",
 	}
 	exprAttrValues := map[string]types.AttributeValue{
 		":n": &types.AttributeValueMemberS{Value: apiKey.Name},
 		":p": &types.AttributeValueMemberSS{Value: apiKey.Permissions},
 		":s": &types.AttributeValueMemberS{Value: string(apiKey.Status)},
 		":e": &types.AttributeValueMemberS{Value: apiKey.ExpiresAt.Format(time.RFC3339)},
+		":t": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", apiKey.ExpiresAt.Unix())}, // Update TTL when expiration changes
 	}
 
 	var updatedApiKey DynamoDBApiKey

@@ -9,6 +9,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// AuditLoggerInterface defines the interface for audit logging
+type AuditLoggerInterface interface {
+	LogAuthentication(ctx context.Context, accountID, apiKeyID *uuid.UUID, apiKeyName *string, ipAddress, userAgent string, success bool, details map[string]string)
+	LogAPIKeyCreation(ctx context.Context, accountID, apiKeyID *uuid.UUID, apiKeyName *string, ipAddress, userAgent string, details map[string]string)
+	LogAPIKeyRevocation(ctx context.Context, accountID, apiKeyID *uuid.UUID, apiKeyName *string, ipAddress, userAgent string, details map[string]string)
+	LogAccountCreation(ctx context.Context, accountID *uuid.UUID, accountName *string, ipAddress, userAgent string, details map[string]string)
+}
+
 // AuditEvent represents an audit log event
 type AuditEvent struct {
 	Timestamp  time.Time         `json:"timestamp"`

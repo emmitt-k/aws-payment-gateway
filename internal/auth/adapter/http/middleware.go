@@ -10,6 +10,7 @@ import (
 
 	"github.com/aws-payment-gateway/internal/auth/adapter/http/dto"
 	"github.com/aws-payment-gateway/internal/auth/audit"
+	"github.com/aws-payment-gateway/internal/auth/domain"
 	"github.com/aws-payment-gateway/internal/auth/repository"
 	"github.com/aws-payment-gateway/internal/auth/usecase"
 )
@@ -18,15 +19,15 @@ import (
 type AuthMiddleware struct {
 	validateApiKey *usecase.ValidateApiKey
 	apiKeyRepo     repository.ApiKeyRepository
-	auditLogger    *audit.AuditLogger
+	auditLogger    audit.AuditLoggerInterface
 }
 
 // NewAuthMiddleware creates a new AuthMiddleware
-func NewAuthMiddleware(validateApiKey *usecase.ValidateApiKey, apiKeyRepo repository.ApiKeyRepository) *AuthMiddleware {
+func NewAuthMiddleware(validateApiKey *usecase.ValidateApiKey, apiKeyRepo repository.ApiKeyRepository, auditLogger audit.AuditLoggerInterface) *AuthMiddleware {
 	return &AuthMiddleware{
 		validateApiKey: validateApiKey,
 		apiKeyRepo:     apiKeyRepo,
-		auditLogger:    audit.NewAuditLogger(),
+		auditLogger:    auditLogger,
 	}
 }
 
@@ -56,15 +57,15 @@ func (m *AuthMiddleware) RequireAuth() fiber.Handler {
 			)
 
 			return c.Status(fiber.StatusUnauthorized).JSON(dto.ErrorResponse{
-				Error:   "missing_api_key",
-				Message: "API key is required",
+				Error:   string(domain.ErrCodeMissingAPIKey),
+				Message: domain.ErrMissingAPIKey.Message,
 			})
 		}
 
 		// Validate API key using usecase
 		ctx := context.Background()
 		validationOutput, err := m.validateApiKey.Execute(ctx, usecase.ValidateApiKeyInput{
-			KeyHash: apiKey,
+			RawKey: apiKey,
 		})
 		if err != nil {
 			// Log failed authentication attempt
@@ -77,7 +78,7 @@ func (m *AuthMiddleware) RequireAuth() fiber.Handler {
 			)
 
 			return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResponse{
-				Error:   "validation_error",
+				Error:   string(domain.ErrCodeValidationFailed),
 				Message: "Failed to validate API key",
 				Details: err.Error(),
 			})
@@ -94,8 +95,8 @@ func (m *AuthMiddleware) RequireAuth() fiber.Handler {
 			)
 
 			return c.Status(fiber.StatusUnauthorized).JSON(dto.ErrorResponse{
-				Error:   "invalid_api_key",
-				Message: "API key is invalid or expired",
+				Error:   string(domain.ErrCodeInvalidAPIKey),
+				Message: domain.ErrInvalidAPIKey.Message,
 			})
 		}
 
