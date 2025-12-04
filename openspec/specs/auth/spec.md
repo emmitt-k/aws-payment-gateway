@@ -120,7 +120,7 @@ The system SHALL provide comprehensive audit logging with DynamoDB integration f
 
 #### Scenario: Structured audit events
 - **WHEN** authentication-related actions occur
-- **THEN** the system logs structured events to DynamoDB with TTL for automatic retention management using proper partition key format (AUDIT#EVENTTYPE#YYYY-MM-DD)
+- **THEN** the system logs structured events exclusively to DynamoDB with TTL for automatic retention management using proper partition key format (AUDIT#EVENTTYPE#YYYY-MM-DD)
 
 #### Scenario: Audit log querying
 - **WHEN** compliance reports or security investigations are needed
@@ -132,7 +132,11 @@ The system SHALL provide comprehensive audit logging with DynamoDB integration f
 
 #### Scenario: Failed authentication tracking
 - **WHEN** authentication attempts fail for any reason
-- **THEN** the system logs detailed failure information including IP address, user agent, and failure reason to DynamoDB for security analysis
+- **THEN** the system logs detailed failure information including IP address, user agent, and failure reason exclusively to DynamoDB for security analysis
+
+#### Scenario: Centralized audit storage
+- **WHEN** any audit event occurs in the auth service
+- **THEN** the system stores the event only in DynamoDB without file-based backup to ensure centralized audit management
 
 ### Requirement: Enhanced Error Handling
 The system SHALL provide specific error codes and detailed error responses for all authentication failures.

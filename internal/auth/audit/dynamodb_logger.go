@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -13,17 +14,36 @@ import (
 	"github.com/aws-payment-gateway/internal/common/db"
 )
 
+// AuditLoggerInterface defines the interface for audit logging
+type AuditLoggerInterface interface {
+	LogAuthentication(ctx context.Context, accountID, apiKeyID *uuid.UUID, apiKeyName *string, ipAddress, userAgent string, success bool, details map[string]string)
+	LogAPIKeyCreation(ctx context.Context, accountID, apiKeyID *uuid.UUID, apiKeyName *string, ipAddress, userAgent string, details map[string]string)
+	LogAPIKeyRevocation(ctx context.Context, accountID, apiKeyID *uuid.UUID, apiKeyName *string, ipAddress, userAgent string, details map[string]string)
+	LogAccountCreation(ctx context.Context, accountID *uuid.UUID, accountName *string, ipAddress, userAgent string, details map[string]string)
+}
+
+// AuditEvent represents an audit log event
+type AuditEvent struct {
+	Timestamp  time.Time         `json:"timestamp"`
+	EventType  string            `json:"event_type"`
+	AccountID  *uuid.UUID        `json:"account_id,omitempty"`
+	APIKeyID   *uuid.UUID        `json:"api_key_id,omitempty"`
+	APIKeyName *string           `json:"api_key_name,omitempty"`
+	IPAddress  string            `json:"ip_address"`
+	UserAgent  string            `json:"user_agent"`
+	Success    bool              `json:"success"`
+	Details    map[string]string `json:"details,omitempty"`
+}
+
 // DynamoDBAuditLogger handles logging of audit events to DynamoDB
 type DynamoDBAuditLogger struct {
 	client *db.DynamoDBClient
-	logger *AuditLogger // Keep file logger as backup
 }
 
 // NewDynamoDBAuditLogger creates a new DynamoDBAuditLogger
 func NewDynamoDBAuditLogger(client *db.DynamoDBClient) *DynamoDBAuditLogger {
 	return &DynamoDBAuditLogger{
 		client: client,
-		logger: NewAuditLogger(), // Keep file logger as backup
 	}
 }
 
@@ -35,11 +55,8 @@ type DynamoDBAuditEvent struct {
 	TTL int64  `dynamodbav:"ttl" json:"ttl"` // For automatic cleanup (90 days)
 }
 
-// LogAuthentication logs an authentication event to both file and DynamoDB
+// LogAuthentication logs an authentication event to DynamoDB
 func (a *DynamoDBAuditLogger) LogAuthentication(ctx context.Context, accountID, apiKeyID *uuid.UUID, apiKeyName *string, ipAddress, userAgent string, success bool, details map[string]string) {
-	// Log to file first (backup)
-	a.logger.LogAuthentication(ctx, accountID, apiKeyID, apiKeyName, ipAddress, userAgent, success, details)
-
 	// Create DynamoDB event
 	event := &DynamoDBAuditEvent{
 		AuditEvent: AuditEvent{
@@ -61,15 +78,12 @@ func (a *DynamoDBAuditLogger) LogAuthentication(ctx context.Context, accountID, 
 	// Store in DynamoDB with error handling
 	if err := a.storeAuditEvent(ctx, event); err != nil {
 		// Log error but don't fail the request
-		a.logger.logger.Printf("Failed to store authentication audit event in DynamoDB: %v", err)
+		log.Printf("Failed to store authentication audit event in DynamoDB: %v", err)
 	}
 }
 
-// LogAPIKeyCreation logs an API key creation event to both file and DynamoDB
+// LogAPIKeyCreation logs an API key creation event to DynamoDB
 func (a *DynamoDBAuditLogger) LogAPIKeyCreation(ctx context.Context, accountID, apiKeyID *uuid.UUID, apiKeyName *string, ipAddress, userAgent string, details map[string]string) {
-	// Log to file first (backup)
-	a.logger.LogAPIKeyCreation(ctx, accountID, apiKeyID, apiKeyName, ipAddress, userAgent, details)
-
 	// Create DynamoDB event
 	event := &DynamoDBAuditEvent{
 		AuditEvent: AuditEvent{
@@ -91,15 +105,12 @@ func (a *DynamoDBAuditLogger) LogAPIKeyCreation(ctx context.Context, accountID, 
 	// Store in DynamoDB with error handling
 	if err := a.storeAuditEvent(ctx, event); err != nil {
 		// Log error but don't fail request
-		a.logger.logger.Printf("Failed to store account creation audit event in DynamoDB: %v", err)
+		log.Printf("Failed to store account creation audit event in DynamoDB: %v", err)
 	}
 }
 
-// LogAPIKeyRevocation logs an API key revocation event to both file and DynamoDB
+// LogAPIKeyRevocation logs an API key revocation event to DynamoDB
 func (a *DynamoDBAuditLogger) LogAPIKeyRevocation(ctx context.Context, accountID, apiKeyID *uuid.UUID, apiKeyName *string, ipAddress, userAgent string, details map[string]string) {
-	// Log to file first (backup)
-	a.logger.LogAPIKeyRevocation(ctx, accountID, apiKeyID, apiKeyName, ipAddress, userAgent, details)
-
 	// Create DynamoDB event
 	event := &DynamoDBAuditEvent{
 		AuditEvent: AuditEvent{
@@ -121,15 +132,12 @@ func (a *DynamoDBAuditLogger) LogAPIKeyRevocation(ctx context.Context, accountID
 	// Store in DynamoDB with error handling
 	if err := a.storeAuditEvent(ctx, event); err != nil {
 		// Log error but don't fail request
-		a.logger.logger.Printf("Failed to store API key creation audit event in DynamoDB: %v", err)
+		log.Printf("Failed to store API key creation audit event in DynamoDB: %v", err)
 	}
 }
 
-// LogAccountCreation logs an account creation event to both file and DynamoDB
+// LogAccountCreation logs an account creation event to DynamoDB
 func (a *DynamoDBAuditLogger) LogAccountCreation(ctx context.Context, accountID *uuid.UUID, accountName *string, ipAddress, userAgent string, details map[string]string) {
-	// Log to file first (backup)
-	a.logger.LogAccountCreation(ctx, accountID, accountName, ipAddress, userAgent, details)
-
 	// Create DynamoDB event
 	event := &DynamoDBAuditEvent{
 		AuditEvent: AuditEvent{
@@ -149,7 +157,7 @@ func (a *DynamoDBAuditLogger) LogAccountCreation(ctx context.Context, accountID 
 	// Store in DynamoDB with error handling
 	if err := a.storeAuditEvent(ctx, event); err != nil {
 		// Log error but don't fail request
-		a.logger.logger.Printf("Failed to store API key revocation audit event in DynamoDB: %v", err)
+		log.Printf("Failed to store API key revocation audit event in DynamoDB: %v", err)
 	}
 }
 
@@ -243,4 +251,19 @@ func (a *DynamoDBAuditLogger) storeAuditEvent(ctx context.Context, event *Dynamo
 		return fmt.Errorf("failed to store audit event in DynamoDB: %w", err)
 	}
 	return nil
+}
+
+// GetEventDescription returns a human-readable description of an event type
+func GetEventDescription(eventType string) string {
+	descriptions := map[string]string{
+		"authentication":  "API key authentication attempt",
+		"api_key_created": "API key created",
+		"api_key_revoked": "API key revoked",
+		"account_created": "Account created",
+	}
+
+	if desc, exists := descriptions[eventType]; exists {
+		return desc
+	}
+	return eventType
 }

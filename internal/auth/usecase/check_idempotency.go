@@ -2,8 +2,6 @@ package usecase
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -248,10 +246,4 @@ func (uc *CompleteIdempotency) validateCompleteInput(input CompleteIdempotencyIn
 		return fmt.Errorf("response is required")
 	}
 	return nil
-}
-
-// generateRequestHash generates a hash for the request
-func generateRequestHash(data []byte) string {
-	hash := sha256.Sum256(data)
-	return hex.EncodeToString(hash[:])
 }
