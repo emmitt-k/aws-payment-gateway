@@ -1,10 +1,10 @@
 version: '3.8'
 
 services:
-  # PostgreSQL for account storage
+  # PostgreSQL Database
   postgres:
-    image: postgres:15-alpine
-    container_name: payment-gateway-postgres
+    image: postgres:16-alpine
+    container_name: postgres
     environment:
       POSTGRES_DB: payment_gateway
       POSTGRES_USER: postgres
@@ -15,75 +15,189 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d
     networks:
-      - payment-gateway-network
+      - app-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # DynamoDB Local for API keys and other data
+  # DynamoDB Local
   dynamodb:
     image: amazon/dynamodb-local:latest
-    container_name: payment-gateway-dynamodb
+    container_name: dynamodb
     ports:
       - "8000:8000"
-    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    command: ["java", "-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
     networks:
-      - payment-gateway-network
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Auth Service
-  auth-svc:
+  auth:
     build:
       context: .
       dockerfile: cmd/auth-svc/Dockerfile
-    container_name: payment-gateway-auth-svc
+    container_name: auth
     environment:
-      PORT: "8080"
-      AWS_REGION: "us-west-2"
-      DYNAMODB_TABLE: "auth-service"
-      DYNAMODB_ENDPOINT: "http://dynamodb:8000"
-      POSTGRES_HOST: "postgres"
-      POSTGRES_PORT: "5432"
-      POSTGRES_USER: "postgres"
-      POSTGRES_PASSWORD: "password"
-      POSTGRES_DB: "payment_gateway"
+      ENVIRONMENT: local
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payment_gateway
+      DYNAMODB_ENDPOINT: http://dynamodb:8000
+      DYNAMODB_REGION: us-west-2
+      SERVER_PORT: 8080
     ports:
       - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
       dynamodb:
-        condition: service_started
+        condition: service_healthy
     networks:
-      - payment-gateway-network
-    volumes:
-      - ./deploy/scripts:/app/scripts
+      - app-network
+    restart: unless-stopped
 
-  # Migration runner (run once to setup database)
-  migrate:
-    image: migrate/migrate
-    container_name: payment-gateway-migrate
+  # Payin Service
+  payin:
+    build:
+      context: .
+      dockerfile: cmd/payin-svc/Dockerfile
+    container_name: payin
     environment:
-      DATABASE_URL: "postgres://postgres:password@postgres:5432/payment_gateway?sslmode=disable"
-    command: [
-      "-path", "/migrations",
-      "-database", "postgres://postgres:password@postgres:5432/payment_gateway?sslmode=disable",
-      "up"
-    ]
-    volumes:
-      - ./migrations:/migrations
+      ENVIRONMENT: local
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payment_gateway
+      DYNAMODB_ENDPOINT: http://dynamodb:8000
+      DYNAMODB_REGION: us-west-2
+      SERVER_PORT: 8081
+    ports:
+      - "8081:8081"
     depends_on:
       postgres:
         condition: service_healthy
+      dynamodb:
+        condition: service_healthy
     networks:
-      - payment-gateway-network
+      - app-network
+    restart: unless-stopped
     profiles:
-      - migrate
+      - microservices
+
+  # Observer Service
+  observer:
+    build:
+      context: .
+      dockerfile: cmd/observer-svc/Dockerfile
+    container_name: observer
+    environment:
+      ENVIRONMENT: local
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payment_gateway
+      DYNAMODB_ENDPOINT: http://dynamodb:8000
+      DYNAMODB_REGION: us-west-2
+      SERVER_PORT: 8082
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dynamodb:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+    profiles:
+      - microservices
+
+  # Ledger Service
+  ledger:
+    build:
+      context: .
+      dockerfile: cmd/ledger-svc/Dockerfile
+    container_name: ledger
+    environment:
+      ENVIRONMENT: local
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payment_gateway
+      DYNAMODB_ENDPOINT: http://dynamodb:8000
+      DYNAMODB_REGION: us-west-2
+      SERVER_PORT: 8083
+    ports:
+      - "8083:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dynamodb:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+    profiles:
+      - microservices
+
+  # Payout Service
+  payout:
+    build:
+      context: .
+      dockerfile: cmd/payout-svc/Dockerfile
+    container_name: payout
+    environment:
+      ENVIRONMENT: local
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payment_gateway
+      DYNAMODB_ENDPOINT: http://dynamodb:8000
+      DYNAMODB_REGION: us-west-2
+      SERVER_PORT: 8084
+    ports:
+      - "8084:8084"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dynamodb:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+    profiles:
+      - microservices
+
+  # DynamoDB Admin
+  admin:
+    image: aaronshaf/dynamodb-admin:latest
+    container_name: admin
+    environment:
+      DYNAMO_ENDPOINT: http://dynamodb:8000
+    ports:
+      - "8001:8001"
+    depends_on:
+      - dynamodb
+    networks:
+      - app-network
+    profiles:
+      - admin
 
 volumes:
   postgres_data:
 
 networks:
-  payment-gateway-network:
+  app-network:
     driver: bridge
