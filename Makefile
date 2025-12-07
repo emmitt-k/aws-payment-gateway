@@ -1,4 +1,4 @@
-.PHONY: help up down build test clean check-prereqs check-aws-prereqs plan-dev plan-prod deploy-dev deploy-prod destroy-dev destroy-prod aws-status aws-logs-dev aws-logs-prod logs shell init-terraform
+.PHONY: help up down build test clean check-prereqs check-aws-prereqs plan-dev plan-prod deploy-dev deploy-prod destroy-dev destroy-prod aws-status aws-logs-dev aws-logs-prod logs shell init-terraform openspec-list openspec-validate
 
 help:
 	@echo "Payment Gateway - Simple Commands"
@@ -32,6 +32,10 @@ help:
 	@echo "Build:"
 	@echo "  build           - Build all services"
 	@echo "  clean           - Clean build artifacts"
+	@echo ""
+	@echo "OpenSpec:"
+	@echo "  openspec-list   - List active changes and specs"
+	@echo "  openspec-validate - Validate all specs and changes"
 
 # Local Development
 up:
@@ -159,3 +163,19 @@ aws-logs-prod:
 aws-status:
 	@echo "Checking AWS deployment status..."
 	cd terraform && terraform output
+
+# OpenSpec Commands
+openspec-list:
+	@echo "Listing OpenSpec changes and specs..."
+	openspec list
+	@echo ""
+	openspec list --specs
+
+openspec-validate:
+	@echo "Validating OpenSpec specs and changes..."
+	openspec validate --specs --strict
+	@if openspec list | grep -q "No active changes found"; then \
+		echo "No active changes to validate"; \
+	else \
+		openspec validate --changes --strict; \
+	fi

@@ -42,6 +42,8 @@ make deploy-prod
 | `make build` | Build all services |
 | `make deploy-dev` | Deploy to AWS dev |
 | `make deploy-prod` | Deploy to AWS production |
+| `make openspec-list` | List active changes and specs |
+| `make openspec-validate` | Validate all specs and changes |
 
 ## 🏗️ Architecture
 
@@ -95,24 +97,9 @@ make test-integration
 - Terraform installed
 - Docker installed
 
-### Deployment Script
-```bash
-# Basic deployment
-./deploy.sh dev
-
-# Production deployment
-./deploy.sh prod
-
-# Skip build (use existing images)
-./deploy.sh dev --skip-build
-
-# Skip infrastructure (deploy services only)
-./deploy.sh dev --skip-infra
-```
-
 ### Environment Files
-- `deploy/terraform/dev.tfvars` - Dev infrastructure
-- `deploy/terraform/prod.tfvars` - Production infrastructure
+- `terraform/dev.tfvars` - Dev infrastructure
+- `terraform/prod.tfvars` - Production infrastructure
 
 ## 🛠️ Project Structure
 
@@ -125,15 +112,22 @@ make test-integration
 │   ├── ledger-svc/
 │   └── payout-svc/
 ├── internal/               # Business logic
-│   ├── auth/
-│   ├── payin/
-│   ├── observer/
-│   └── ledger/
+│   ├── auth/              # Authentication service
+│   ├── payin/             # Payin service
+│   ├── observer/          # Observer service
+│   ├── ledger/            # Ledger service
+│   └── common/            # Shared utilities
 ├── migrations/             # Database migrations
-├── deploy/                 # Deployment files
-│   └── terraform/         # AWS infrastructure
-├── docker-compose.yml       # Local development
-├── deploy.sh              # AWS deployment script
+├── openspec/              # Specifications and change proposals
+│   ├── specs/             # Current specifications
+│   ├── changes/           # Change proposals
+│   │   └── archive/       # Archived changes
+│   └── AGENTS.md          # OpenSpec instructions
+├── terraform/             # AWS infrastructure
+│   ├── main.tf
+│   ├── dev.tfvars
+│   └── prod.tfvars
+├── docker-compose.yml      # Local development
 ├── Makefile               # Build commands
 └── README.md              # This file
 ```
@@ -168,7 +162,7 @@ docker logs auth
 docker logs postgres
 
 # AWS issues
-cd deploy/terraform && terraform show
+cd terraform && terraform show
 ```
 
 ### Debug Mode
@@ -186,6 +180,8 @@ go test -v ./...
 - **Database**: PostgreSQL + DynamoDB hybrid
 - **Security**: API key authentication
 - **Scaling**: Auto-scaling policies
+- **Specifications**: See `openspec/specs/` for detailed requirements
+- **Change Management**: See `openspec/AGENTS.md` for development workflow
 
 ## 🤝 Contributing
 
