@@ -6,7 +6,7 @@ provider "aws" {
 # Variables
 variable "aws_region" {
   description = "AWS region"
-  default     = "us-west-2"
+  default     = "ap-southeast-1"
 }
 
 variable "environment" {
@@ -217,7 +217,6 @@ resource "aws_db_instance" "postgres" {
   identifier = "${var.environment}-postgres"
   
   engine         = "postgres"
-  engine_version = "15.4"
   instance_class = "db.t3.micro"
   
   allocated_storage = 20
@@ -276,10 +275,11 @@ resource "aws_lb" "main" {
 
 # Target Group
 resource "aws_lb_target_group" "main" {
-  name     = "${var.environment}-tg"
-  port     = 8080
-  protocol = "HTTP"
-  vpc_id   = aws_vpc.main.id
+  name        = "${var.environment}-tg"
+  port        = 8080
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "ip"
   
   health_check {
     enabled             = true
@@ -324,7 +324,7 @@ resource "aws_ecs_task_definition" "auth" {
   container_definitions = jsonencode([
     {
       name  = "auth"
-      image = "auth-service:latest"
+      image = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/auth-service:latest"
       
       portMappings = [
         {
