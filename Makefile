@@ -1,4 +1,4 @@
-.PHONY: help up down build test clean check-prereqs check-aws-prereqs plan-dev plan-prod deploy-dev deploy-prod destroy-dev destroy-prod aws-status aws-logs-dev aws-logs-prod logs shell init-terraform openspec-list openspec-validate
+.PHONY: help up down build test clean check-prereqs check-aws-prereqs plan-dev plan-prod deploy-dev deploy-prod destroy-dev destroy-prod aws-status aws-logs-dev aws-logs-prod logs shell init-terraform openspec-list openspec-validate migrate-dev migrate-prod migrate-status-dev migrate-status-prod
 
 help:
 	@echo "Payment Gateway - Simple Commands"
@@ -14,11 +14,17 @@ help:
 	@echo "  test-unit       - Run unit tests"
 	@echo "  test-integration - Run integration tests"
 	@echo ""
+	@echo "Database Migrations:"
+	@echo "  migrate-dev     - Migrate dev database"
+	@echo "  migrate-prod    - Migrate prod database"
+	@echo "  migrate-status-dev  - Check dev migration status"
+	@echo "  migrate-status-prod - Check prod migration status"
+	@echo ""
 	@echo "AWS Deployment:"
 	@echo "  plan-dev        - Plan dev deployment"
 	@echo "  plan-prod       - Plan production deployment"
-	@echo "  deploy-dev      - Deploy to dev environment"
-	@echo "  deploy-prod     - Deploy to production"
+	@echo "  deploy-dev      - Deploy to dev environment (includes migration)"
+	@echo "  deploy-prod     - Deploy to production (includes migration)"
 	@echo "  destroy-dev     - Destroy dev environment"
 	@echo "  destroy-prod    - Destroy production environment"
 	@echo "  aws-status      - Check AWS deployment status"
@@ -128,12 +134,18 @@ plan-prod:
 
 deploy-dev: init-terraform
 	@echo "Deploying to dev environment..."
+	@echo "First, deploying infrastructure..."
 	cd terraform && terraform apply -var-file="dev.tfvars" -auto-approve
+	@echo "Now running database migrations..."
+	./scripts/migrate.sh dev up
 	@echo "✓ Dev deployment complete!"
 
 deploy-prod: init-terraform
 	@echo "Deploying to production environment..."
+	@echo "First, deploying infrastructure..."
 	cd terraform && terraform apply -var-file="prod.tfvars" -auto-approve
+	@echo "Now running database migrations..."
+	./scripts/migrate.sh prod up
 	@echo "✓ Production deployment complete!"
 
 destroy-dev:
@@ -179,3 +191,20 @@ openspec-validate:
 	else \
 		openspec validate --changes --strict; \
 	fi
+
+# Database Migrations
+migrate-dev:
+	@echo "Migrating dev database..."
+	./scripts/migrate.sh dev up
+
+migrate-prod:
+	@echo "Migrating prod database..."
+	./scripts/migrate.sh prod up
+
+migrate-status-dev:
+	@echo "Checking dev migration status..."
+	./scripts/migrate.sh dev status
+
+migrate-status-prod:
+	@echo "Checking prod migration status..."
+	./scripts/migrate.sh prod status

@@ -442,3 +442,34 @@ output "service_name" {
   description = "ECS service name"
   value       = aws_ecs_service.auth.name
 }
+
+# Database Connection Outputs
+output "db_host" {
+  description = "RDS PostgreSQL hostname"
+  value       = aws_db_instance.postgres.address
+  sensitive   = false
+}
+
+output "db_port" {
+  description = "RDS PostgreSQL port"
+  value       = aws_db_instance.postgres.port
+  sensitive   = false
+}
+
+output "db_name" {
+  description = "RDS PostgreSQL database name"
+  value       = aws_db_instance.postgres.db_name
+  sensitive   = false
+}
+
+output "db_user" {
+  description = "RDS PostgreSQL username"
+  value       = aws_db_instance.postgres.username
+  sensitive   = false
+}
+
+output "db_endpoint" {
+  description = "RDS PostgreSQL endpoint (host:port)"
+  value       = "${aws_db_instance.postgres.address}:${aws_db_instance.postgres.port}"
+  sensitive   = false
+}
